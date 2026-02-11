@@ -50,7 +50,7 @@ jobs:
           go install github.com/003random/getJS/v2@latest
 
           # Secrets scanning
-          go install github.com/MrEmpy/mantra@latest
+          go install github.com/Brosck/mantra@latest
 
           # Move binaries
           sudo cp ~/go/bin/* /usr/local/bin/
