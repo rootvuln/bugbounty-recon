@@ -94,9 +94,9 @@ jobs:
       - name: Collect URLs (gau + waybackurls)
         run: |
           gau "$DOMAIN" > output/gau.txt || true
-          cat output/subdomains.txt | waybackurls > output/wayback.txt || true
+          timeout 15m waybackurls cat output/subdomains.txt | waybackurls > output/wayback.txt || true
 
-          cat output/gau.txt output/wayback.txt | sort -u > output/all_urls.txt
+          timeout 15m gau cat output/gau.txt output/wayback.txt | sort -u > output/all_urls.txt
 
       - name: Crawl Main App (Katana slow)
         run: |
