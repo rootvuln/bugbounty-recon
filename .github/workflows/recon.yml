@@ -1,8 +1,6 @@
 name: Slow Bug Bounty Recon + JS Analysis
 
 on:
-  schedule:
-    - cron: "0 19 * * *"   # Daily 7PM UTC (~12:30 AM IST)
   workflow_dispatch:
 
 env:
