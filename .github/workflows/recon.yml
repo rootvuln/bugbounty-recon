@@ -1,0 +1,174 @@
+name: Slow Bug Bounty Recon + JS Analysis
+
+on:
+  schedule:
+    - cron: "0 19 * * *"   # Daily 7PM UTC (~12:30 AM IST)
+  workflow_dispatch:
+
+env:
+  DOMAIN: figma.com
+  MAIN_APP: https://www.figma.com/
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y curl git unzip jq python3 python3-pip
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+
+      - name: Install tools
+        run: |
+          # Recon tools
+          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install github.com/owasp-amass/amass/v4/cmd/amass@latest
+          go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/projectdiscovery/katana/cmd/katana@latest
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+
+          # URL tools
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/tomnomnom/waybackurls@latest
+
+          # JS tools
+          go install github.com/lc/subjs@latest
+          go install github.com/003random/getJS/v2@latest
+
+          # Secrets scanning
+          go install github.com/MrEmpy/mantra@latest
+
+          # Move binaries
+          sudo cp ~/go/bin/* /usr/local/bin/
+
+      - name: Install LinkFinder
+        run: |
+          git clone https://github.com/GerbenJavado/LinkFinder.git
+          cd LinkFinder
+          pip3 install -r requirements.txt
+
+      - name: Create folders
+        run: |
+          mkdir -p output diff js_analysis
+
+      - name: Subdomain Enumeration
+        run: |
+          echo "[+] Running subfinder..."
+          subfinder -d "$DOMAIN" -all -silent > output/subfinder.txt
+
+          echo "[+] Running amass passive..."
+          amass enum -passive -d "$DOMAIN" -o output/amass.txt || true
+
+          cat output/subfinder.txt output/amass.txt | sort -u > output/subdomains.txt
+
+      - name: Resolve Subdomains (dnsx)
+        run: |
+          cat output/subdomains.txt | dnsx -silent -o output/resolved.txt
+
+      - name: Live Hosts (Slow)
+        run: |
+          cat output/resolved.txt | httpx -silent -sc -title -tech-detect -rl 2 -threads 5 > output/live.txt
+          cat output/live.txt | awk '{print $1}' | sort -u > output/live_hosts.txt
+
+      - name: Collect URLs (gau + waybackurls)
+        run: |
+          gau "$DOMAIN" > output/gau.txt || true
+          cat output/subdomains.txt | waybackurls > output/wayback.txt || true
+
+          cat output/gau.txt output/wayback.txt | sort -u > output/all_urls.txt
+
+      - name: Crawl Main App (Katana slow)
+        run: |
+          katana -u "$MAIN_APP" -d 4 -rl 1 -c 1 -silent > output/katana.txt || true
+          cat output/all_urls.txt output/katana.txt | sort -u > output/final_urls.txt
+
+      - name: Extract Parameters
+        run: |
+          cat output/final_urls.txt | grep "=" | sort -u > output/params.txt || true
+
+      - name: JavaScript Discovery (subjs + getJS)
+        run: |
+          cat output/live_hosts.txt | subjs > output/js_subjs.txt || true
+          getJS --input output/live_hosts.txt --complete --output output/js_getjs.txt || true
+          cat output/js_subjs.txt output/js_getjs.txt | sort -u > output/all_js.txt
+
+      - name: JS Endpoint Extraction (LinkFinder)
+        run: |
+          rm -f js_analysis/linkfinder_endpoints.txt
+          touch js_analysis/linkfinder_endpoints.txt
+
+          while read -r jsurl; do
+            echo "[+] Scanning JS: $jsurl"
+            python3 LinkFinder/linkfinder.py -i "$jsurl" -o cli >> js_analysis/linkfinder_endpoints.txt || true
+            sleep 1
+          done < output/all_js.txt
+
+          cat js_analysis/linkfinder_endpoints.txt | sort -u > output/js_endpoints.txt
+
+      - name: Secrets Scan (Mantra slow)
+        run: |
+          mantra -l output/all_js.txt -o output/js_secrets.txt -silent -rl 1 || true
+
+      - name: Nuclei Scan (Safe + Slow)
+        run: |
+          nuclei -l output/live_hosts.txt \
+            -severity medium,high,critical \
+            -tags exposure,misconfig,cves \
+            -rl 1 -c 1 -timeout 10 -retries 1 \
+            -o output/nuclei_results.txt || true
+
+      - name: Diff New Findings
+        run: |
+          touch diff/subdomains_latest.txt diff/urls_latest.txt diff/js_latest.txt diff/secrets_latest.txt
+
+          cp diff/subdomains_latest.txt diff/old_subdomains.txt || true
+          cp diff/urls_latest.txt diff/old_urls.txt || true
+          cp diff/js_latest.txt diff/old_js.txt || true
+          cp diff/secrets_latest.txt diff/old_secrets.txt || true
+
+          cp output/subdomains.txt diff/subdomains_latest.txt
+          cp output/final_urls.txt diff/urls_latest.txt
+          cp output/all_js.txt diff/js_latest.txt
+          cp output/js_secrets.txt diff/secrets_latest.txt
+
+          comm -13 <(sort diff/old_subdomains.txt) <(sort diff/subdomains_latest.txt) > diff/new_subdomains.txt || true
+          comm -13 <(sort diff/old_urls.txt) <(sort diff/urls_latest.txt) > diff/new_urls.txt || true
+          comm -13 <(sort diff/old_js.txt) <(sort diff/js_latest.txt) > diff/new_js.txt || true
+          comm -13 <(sort diff/old_secrets.txt) <(sort diff/secrets_latest.txt) > diff/new_secrets.txt || true
+
+      - name: Telegram Alert
+        if: always()
+        run: |
+          NEW_SUBS=$(cat diff/new_subdomains.txt | wc -l)
+          NEW_URLS=$(cat diff/new_urls.txt | wc -l)
+          NEW_JS=$(cat diff/new_js.txt | wc -l)
+          NEW_SECRETS=$(cat diff/new_secrets.txt | wc -l)
+
+          MESSAGE="✅ Recon Completed for $DOMAIN%0A%0A🌐 New Subdomains: $NEW_SUBS%0A🔗 New URLs: $NEW_URLS%0A📜 New JS Files: $NEW_JS%0A🔑 New Secrets Hits: $NEW_SECRETS%0A%0A📁 Check repo output/ folder."
+
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+            -d text="$MESSAGE"
+
+      - name: Commit Results
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+
+          git add output/ diff/ js_analysis/
+          git commit -m "Daily slow recon update" || echo "No changes"
+          git push
