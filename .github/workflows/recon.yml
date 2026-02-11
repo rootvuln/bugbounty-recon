@@ -80,7 +80,7 @@ jobs:
           subfinder -d "$DOMAIN" -all -silent > output/subfinder.txt
 
           echo "[+] Running amass passive..."
-          amass enum -passive -d "$DOMAIN" -o output/amass.txt || true
+          timeout 30m amass enum -passive -d "$DOMAIN" -o output/amass.txt || true
 
           cat output/subfinder.txt output/amass.txt | sort -u > output/subdomains.txt
 
