@@ -1,149 +1,195 @@
-name: Slow Bug Bounty Recon + JS Analysis
+name: Maximum Recon Collector
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
-  DOMAIN: meesho.com
-  MAIN_APP: https://www.meesho.com/
+  DOMAIN: "meesho.com"
+  MAIN_APP: "https://www.meesho.com/"
 
 jobs:
   recon:
     runs-on: ubuntu-latest
-    timeout-minutes: 180   # Whole job max runtime (3 hours)
-
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
-        timeout-minutes: 10
+      - name: Install System Dependencies
+        shell: bash
         run: |
           sudo apt update
-          sudo apt install -y curl git unzip jq python3 python3-pip
+          sudo apt install -y curl git unzip jq python3 python3-pip coreutils
 
-      - name: Setup Go
+      - name: Setup Go Environment
         uses: actions/setup-go@v4
         with:
           go-version: "1.22"
 
-      - name: Cache Go build
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-cache
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Install tools
-        timeout-minutes: 20
+      - name: Install Go-Based Tools
+        shell: bash
         run: |
           go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install github.com/owasp-amass/amass/v4/cmd/amass@latest
+          go install github.com/tomnomnom/assetfinder@latest
           go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+          go install github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install github.com/projectdiscovery/katana/cmd/katana@latest
           go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/bp0lr/gauplus@latest
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/subjs@latest
           go install github.com/003random/getJS/v2@latest
-          go install github.com/Brosck/mantra@latest
-
+          go install github.com/tomnomnom/hakrawler@latest
+          go install github.com/jaeles-project/gospider@latest
+          go install github.com/gwen001/github-subdomains@latest
+          go install github.com/cgboal/sonarsearch/crobat@latest
+          go install github.com/haccer/subjack@latest
+          go install github.com/LukaSikic/subzy@latest
           sudo cp ~/go/bin/* /usr/local/bin/
 
-      - name: Install LinkFinder
-        timeout-minutes: 5
+      - name: Install Python-Based Tools
+        shell: bash
         run: |
-          git clone https://github.com/GerbenJavado/LinkFinder.git
-          cd LinkFinder
-          pip3 install -r requirements.txt
+          pip3 install arjun paramspider
+          pip3 install linkfinder
+          git clone https://github.com/m4ll0k/SecretFinder.git /tmp/SecretFinder || true
+          git clone https://github.com/dark-warlord14/JSScanner.git /tmp/JSScanner || true
 
-      - name: Create folders
+      - name: Create Output Directory
+        shell: bash
         run: |
-          mkdir -p output diff js_analysis
+          RUN_ID=$(date +%F_%H-%M-%S)
+          mkdir -p output/$RUN_ID
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
 
-      # -----------------------------
-      # Subdomain Enumeration
-      # -----------------------------
-      - name: Subdomain Enumeration
-        timeout-minutes: 30
-        run: |
-          timeout 25m subfinder -d "$DOMAIN" -all -silent > output/subfinder.txt || true
-          timeout 25m amass enum -passive -d "$DOMAIN" -o output/amass.txt || true
-          cat output/subfinder.txt output/amass.txt | sort -u > output/subdomains.txt
+      - name: Subfinder Enumeration
+        shell: bash
+        run: timeout 25m subfinder -d $DOMAIN -all -silent > output/$RUN_ID/subfinder.txt || true
 
-      # -----------------------------
-      # DNS Resolution
-      # -----------------------------
-      - name: Resolve Subdomains
-        timeout-minutes: 10
-        run: |
-          timeout 8m dnsx -silent -l output/subdomains.txt -o output/resolved.txt || true
+      - name: Amass Passive Enumeration
+        shell: bash
+        run: timeout 25m amass enum -passive -d $DOMAIN -o output/$RUN_ID/amass.txt || true
 
-      # -----------------------------
-      # Live Hosts
-      # -----------------------------
-      - name: Live Hosts
-        timeout-minutes: 15
-        run: |
-          timeout 12m httpx -silent -sc -title -tech-detect -rl 2 -threads 5 \
-            -l output/resolved.txt \
-            -o output/live.txt || true
+      - name: Assetfinder Enumeration
+        shell: bash
+        run: timeout 15m assetfinder --subs-only $DOMAIN > output/$RUN_ID/assetfinder.txt || true
 
-          awk '{print $1}' output/live.txt | sort -u > output/live_hosts.txt
+      - name: Crobat Enumeration
+        shell: bash
+        run: timeout 15m crobat -s $DOMAIN > output/$RUN_ID/crobat.txt || true
 
-      # -----------------------------
-      # Diff New Findings
-      # -----------------------------
-      - name: Diff New Findings
-        timeout-minutes: 5
-        run: |
-          touch diff/subdomains_latest.txt diff/urls_latest.txt diff/js_latest.txt diff/secrets_latest.txt
+      - name: GitHub Subdomains Enumeration
+        shell: bash
+        run: timeout 20m github-subdomains -d $DOMAIN -o output/$RUN_ID/github_subdomains.txt || true
 
-          cp diff/subdomains_latest.txt diff/old_subdomains.txt || true
-          cp diff/urls_latest.txt diff/old_urls.txt || true
+      - name: Subjack Takeover Check
+        shell: bash
+        run: timeout 20m bash -c "cat output/$RUN_ID/*.txt 2>/dev/null | sort -u | subjack -w /dev/stdin -t 50 -timeout 30 -ssl -o output/$RUN_ID/subjack.txt" || true
 
-          cp output/subdomains.txt diff/subdomains_latest.txt
-          cp output/final_urls.txt diff/urls_latest.txt
+      - name: Subzy Takeover Check
+        shell: bash
+        run: timeout 20m bash -c "cat output/$RUN_ID/*.txt 2>/dev/null | sort -u | subzy run --targets /dev/stdin > output/$RUN_ID/subzy.txt" || true
 
-          comm -13 <(sort diff/old_subdomains.txt) <(sort diff/subdomains_latest.txt) > diff/new_subdomains.txt || true
-          comm -13 <(sort diff/old_urls.txt) <(sort diff/urls_latest.txt) > diff/new_urls.txt || true
+      - name: DNSX Resolution
+        shell: bash
+        run: timeout 15m dnsx -d $DOMAIN -silent > output/$RUN_ID/dnsx.txt || true
 
-      # -----------------------------
-      # Telegram Alert
-      # -----------------------------
-      - name: Telegram Alert
+      - name: ShuffleDNS Resolution
+        shell: bash
+        run: timeout 20m shuffledns -d $DOMAIN -silent > output/$RUN_ID/shuffledns.txt || true
+
+      - name: HTTPX Detailed Probing
+        shell: bash
+        run: timeout 15m bash -c "echo $MAIN_APP | httpx -silent -title -tech-detect -status-code -ip > output/$RUN_ID/httpx.txt" || true
+
+      - name: GAU URL Collection
+        shell: bash
+        run: timeout 20m gau $DOMAIN > output/$RUN_ID/gau.txt || true
+
+      - name: GAUPlus URL Collection
+        shell: bash
+        run: timeout 20m gauplus $DOMAIN > output/$RUN_ID/gauplus.txt || true
+
+      - name: WaybackURLs Collection
+        shell: bash
+        run: timeout 20m waybackurls $DOMAIN > output/$RUN_ID/wayback.txt || true
+
+      - name: Katana Crawling
+        shell: bash
+        run: timeout 30m katana -u $MAIN_APP -depth 3 -silent > output/$RUN_ID/katana.txt || true
+
+      - name: Hakrawler Crawling
+        shell: bash
+        run: timeout 20m bash -c "echo $MAIN_APP | hakrawler -depth 3 > output/$RUN_ID/hakrawler.txt" || true
+
+      - name: GoSpider Crawling
+        shell: bash
+        run: timeout 30m gospider -s $MAIN_APP -d 3 --quiet > output/$RUN_ID/gospider.txt || true
+
+      - name: SubJS Collection
+        shell: bash
+        run: timeout 15m bash -c "echo $MAIN_APP | subjs > output/$RUN_ID/subjs.txt" || true
+
+      - name: GetJS Collection
+        shell: bash
+        run: timeout 15m getJS -url $MAIN_APP > output/$RUN_ID/getjs.txt || true
+
+      - name: LinkFinder Analysis
+        shell: bash
+        run: timeout 20m bash -c "linkfinder -i $MAIN_APP -o cli > output/$RUN_ID/linkfinder.txt" || true
+
+      - name: SecretFinder Analysis
+        shell: bash
+        run: timeout 20m bash -c "cat output/$RUN_ID/subjs.txt output/$RUN_ID/getjs.txt 2>/dev/null | sort -u | while read js_url; do python3 /tmp/SecretFinder/SecretFinder.py -i \$js_url -o cli; done > output/$RUN_ID/secretfinder.txt" || true
+
+      - name: JSScanner Analysis
+        shell: bash
+        run: timeout 20m bash -c "cat output/$RUN_ID/subjs.txt output/$RUN_ID/getjs.txt 2>/dev/null | sort -u | head -50 | while read js_url; do python3 /tmp/JSScanner/JSScanner.py -u \$js_url; done > output/$RUN_ID/jsscanner.txt" || true
+
+      - name: Arjun Parameter Discovery
+        shell: bash
+        run: timeout 15m arjun -u $MAIN_APP --get -oT output/$RUN_ID/arjun.txt || true
+
+      - name: ParamSpider Parameter Discovery
+        shell: bash
+        run: timeout 20m paramspider -d $DOMAIN --output output/$RUN_ID/paramspider.txt || true
+
+      - name: Nuclei Template Update
+        shell: bash
+        run: timeout 10m nuclei -update-templates || true
+
+      - name: Nuclei Vulnerability Scan
+        shell: bash
+        run: timeout 30m bash -c "echo $MAIN_APP | nuclei -t exposures/ -t misconfiguration/ -t cves/ -severity low,medium,high,critical -o output/$RUN_ID/nuclei.txt" || true
+
+      - name: Send Telegram Notification
         if: always()
-        timeout-minutes: 5
+        shell: bash
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          NEW_SUBS=$(wc -l < diff/new_subdomains.txt)
-          NEW_URLS=$(wc -l < diff/new_urls.txt)
-          NEW_JS=$(wc -l < diff/new_js.txt)
-          NEW_SECRETS=$(wc -l < diff/new_secrets.txt)
+          TOTAL_FILES=$(ls output/$RUN_ID 2>/dev/null | wc -l)
+          TOTAL_LINES=$(cat output/$RUN_ID/* 2>/dev/null | wc -l)
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -d chat_id="${CHAT_ID}" \
+            --data-urlencode "text=Recon completed for ${DOMAIN}
+          Folder: output/${RUN_ID}
+          Files: ${TOTAL_FILES}
+          Lines: ${TOTAL_LINES}" || true
 
-          MESSAGE="✅ Recon Completed for $DOMAIN%0A%0A🌐 New Subdomains: $NEW_SUBS%0A🔗 New URLs: $NEW_URLS%0A📜 New JS Files: $NEW_JS%0A🔑 New Secrets Hits: $NEW_SECRETS%0A%0A📁 Check repo output/ folder."
-
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-            -d text="$MESSAGE"
-
-      # -----------------------------
-      # Commit Results
-      # -----------------------------
-      - name: Commit Results
+      - name: Commit and Push Results
         if: always()
-        timeout-minutes: 5
+        shell: bash
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-
-          git add output/ diff/ js_analysis/
-          git commit -m "Daily slow recon update" || echo "No changes"
-          git push
+          git config --global user.name "github-actions[bot]"
+          git add output/
+          git diff --staged --quiet || git commit -m "Recon Results - $RUN_ID"
+          git push || true
