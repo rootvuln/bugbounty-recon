@@ -48,7 +48,6 @@ jobs:
           go install github.com/003random/getJS/v2@latest
           go install github.com/jaeles-project/gospider@latest
           go install github.com/gwen001/github-subdomains@latest
-          go install github.com/cgboal/sonarsearch/crobat@latest
           go install github.com/haccer/subjack@latest
           go install github.com/LukaSikic/subzy@latest
           sudo cp ~/go/bin/* /usr/local/bin/
@@ -79,10 +78,6 @@ jobs:
       - name: Assetfinder Enumeration
         shell: bash
         run: timeout 15m assetfinder --subs-only $DOMAIN > output/$RUN_ID/assetfinder.txt || true
-
-      - name: Crobat Enumeration
-        shell: bash
-        run: timeout 15m crobat -s $DOMAIN > output/$RUN_ID/crobat.txt || true
 
       - name: GitHub Subdomains Enumeration
         shell: bash
