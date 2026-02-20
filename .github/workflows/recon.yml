@@ -28,7 +28,7 @@ jobs:
       - name: Setup Go Environment
         uses: actions/setup-go@v4
         with:
-          go-version: "1.22"
+          go-version: "1.23"
 
       - name: Install Go-Based Tools
         shell: bash
@@ -37,28 +37,21 @@ jobs:
           go install github.com/owasp-amass/amass/v4/cmd/amass@latest
           go install github.com/tomnomnom/assetfinder@latest
           go install github.com/projectdiscovery/dnsx/cmd/dnsx@latest
-          go install github.com/projectdiscovery/shuffledns/cmd/shuffledns@latest
           go install github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install github.com/projectdiscovery/katana/cmd/katana@latest
           go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           go install github.com/lc/gau/v2/cmd/gau@latest
-          go install github.com/bp0lr/gauplus@latest
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/subjs@latest
-          go install github.com/003random/getJS/v2@latest
-          go install github.com/jaeles-project/gospider@latest
           go install github.com/gwen001/github-subdomains@latest
-          go install github.com/haccer/subjack@latest
           go install github.com/LukaSikic/subzy@latest
           sudo cp ~/go/bin/* /usr/local/bin/
 
       - name: Install Python-Based Tools
         shell: bash
         run: |
-          pip3 install arjun paramspider
-          pip3 install linkfinder
-          git clone https://github.com/m4ll0k/SecretFinder.git /tmp/SecretFinder || true
-          git clone https://github.com/dark-warlord14/JSScanner.git /tmp/JSScanner || true
+          pip3 install arjun paramspider linkfinder
+          git clone https://github.com/m4ll0k/SecretFinder.git /tmp/SecretFinder 2>/dev/null || true
 
       - name: Create Output Directory
         shell: bash
@@ -83,10 +76,6 @@ jobs:
         shell: bash
         run: timeout 20m github-subdomains -d $DOMAIN -o output/$RUN_ID/github_subdomains.txt || true
 
-      - name: Subjack Takeover Check
-        shell: bash
-        run: timeout 20m bash -c "cat output/$RUN_ID/*.txt 2>/dev/null | sort -u | subjack -w /dev/stdin -t 50 -timeout 30 -ssl -o output/$RUN_ID/subjack.txt" || true
-
       - name: Subzy Takeover Check
         shell: bash
         run: timeout 20m bash -c "cat output/$RUN_ID/*.txt 2>/dev/null | sort -u | subzy run --targets /dev/stdin > output/$RUN_ID/subzy.txt" || true
@@ -94,10 +83,6 @@ jobs:
       - name: DNSX Resolution
         shell: bash
         run: timeout 15m dnsx -d $DOMAIN -silent > output/$RUN_ID/dnsx.txt || true
-
-      - name: ShuffleDNS Resolution
-        shell: bash
-        run: timeout 20m shuffledns -d $DOMAIN -silent > output/$RUN_ID/shuffledns.txt || true
 
       - name: HTTPX Detailed Probing
         shell: bash
@@ -107,10 +92,6 @@ jobs:
         shell: bash
         run: timeout 20m gau $DOMAIN > output/$RUN_ID/gau.txt || true
 
-      - name: GAUPlus URL Collection
-        shell: bash
-        run: timeout 20m gauplus $DOMAIN > output/$RUN_ID/gauplus.txt || true
-
       - name: WaybackURLs Collection
         shell: bash
         run: timeout 20m waybackurls $DOMAIN > output/$RUN_ID/wayback.txt || true
@@ -119,17 +100,9 @@ jobs:
         shell: bash
         run: timeout 30m katana -u $MAIN_APP -depth 3 -silent > output/$RUN_ID/katana.txt || true
 
-      - name: GoSpider Crawling
-        shell: bash
-        run: timeout 30m gospider -s $MAIN_APP -d 3 --quiet > output/$RUN_ID/gospider.txt || true
-
       - name: SubJS Collection
         shell: bash
         run: timeout 15m bash -c "echo $MAIN_APP | subjs > output/$RUN_ID/subjs.txt" || true
-
-      - name: GetJS Collection
-        shell: bash
-        run: timeout 15m getJS -url $MAIN_APP > output/$RUN_ID/getjs.txt || true
 
       - name: LinkFinder Analysis
         shell: bash
@@ -137,11 +110,7 @@ jobs:
 
       - name: SecretFinder Analysis
         shell: bash
-        run: timeout 20m bash -c "cat output/$RUN_ID/subjs.txt output/$RUN_ID/getjs.txt 2>/dev/null | sort -u | while read js_url; do python3 /tmp/SecretFinder/SecretFinder.py -i \$js_url -o cli; done > output/$RUN_ID/secretfinder.txt" || true
-
-      - name: JSScanner Analysis
-        shell: bash
-        run: timeout 20m bash -c "cat output/$RUN_ID/subjs.txt output/$RUN_ID/getjs.txt 2>/dev/null | sort -u | head -50 | while read js_url; do python3 /tmp/JSScanner/JSScanner.py -u \$js_url; done > output/$RUN_ID/jsscanner.txt" || true
+        run: timeout 20m bash -c "cat output/$RUN_ID/subjs.txt 2>/dev/null | sort -u | head -20 | while read js_url; do python3 /tmp/SecretFinder/SecretFinder.py -i \$js_url -o cli 2>/dev/null; done > output/$RUN_ID/secretfinder.txt" || true
 
       - name: Arjun Parameter Discovery
         shell: bash
