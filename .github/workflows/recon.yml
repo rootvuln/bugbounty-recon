@@ -7,8 +7,8 @@ permissions:
   contents: write
 
 env:
-  DOMAIN: "meesho.com"
-  MAIN_APP: "https://www.meesho.com/"
+  DOMAIN: "example.com"
+  MAIN_APP: "https://www.example.com/"
 
 jobs:
   recon:
@@ -46,7 +46,6 @@ jobs:
           go install github.com/tomnomnom/waybackurls@latest
           go install github.com/lc/subjs@latest
           go install github.com/003random/getJS/v2@latest
-          go install github.com/tomnomnom/hakrawler@latest
           go install github.com/jaeles-project/gospider@latest
           go install github.com/gwen001/github-subdomains@latest
           go install github.com/cgboal/sonarsearch/crobat@latest
@@ -124,10 +123,6 @@ jobs:
       - name: Katana Crawling
         shell: bash
         run: timeout 30m katana -u $MAIN_APP -depth 3 -silent > output/$RUN_ID/katana.txt || true
-
-      - name: Hakrawler Crawling
-        shell: bash
-        run: timeout 20m bash -c "echo $MAIN_APP | hakrawler -depth 3 > output/$RUN_ID/hakrawler.txt" || true
 
       - name: GoSpider Crawling
         shell: bash
