@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 env:
-  DOMAIN: zooplus.com
-  MAIN_APP: https://www.zooplus.com/
+  DOMAIN: meesho.com
+  MAIN_APP: https://www.meesho.com/
 
 jobs:
   recon:
@@ -100,81 +100,6 @@ jobs:
           awk '{print $1}' output/live.txt | sort -u > output/live_hosts.txt
 
       # -----------------------------
-      # URL Collection
-      # -----------------------------
-      - name: Collect URLs
-        timeout-minutes: 20
-        run: |
-          timeout 15m gau "$DOMAIN" > output/gau.txt || true
-          timeout 15m waybackurls < output/subdomains.txt > output/wayback.txt || true
-          cat output/gau.txt output/wayback.txt | sort -u > output/all_urls.txt
-
-      # -----------------------------
-      # Katana Crawl
-      # -----------------------------
-      - name: Crawl Main App
-        timeout-minutes: 20
-        run: |
-          timeout 15m katana -u "$MAIN_APP" -d 4 -rl 1 -c 1 -silent > output/katana.txt || true
-          cat output/all_urls.txt output/katana.txt | sort -u > output/final_urls.txt
-
-      # -----------------------------
-      # Extract Parameters
-      # -----------------------------
-      - name: Extract Parameters
-        timeout-minutes: 5
-        run: |
-          grep "=" output/final_urls.txt | sort -u > output/params.txt || true
-
-      # -----------------------------
-      # JS Discovery
-      # -----------------------------
-      - name: JavaScript Discovery
-        timeout-minutes: 25
-        run: |
-          timeout 20m subjs < output/live_hosts.txt > output/js_subjs.txt || true
-          timeout 20m getJS --input output/live_hosts.txt --complete --output output/js_getjs.txt || true
-          cat output/js_subjs.txt output/js_getjs.txt | sort -u > output/all_js.txt
-
-      # -----------------------------
-      # JS Endpoint Extraction
-      # -----------------------------
-      - name: JS Endpoint Extraction
-        timeout-minutes: 25
-        run: |
-          rm -f js_analysis/linkfinder_endpoints.txt
-          touch js_analysis/linkfinder_endpoints.txt
-
-          timeout 20m bash -c '
-          while read -r jsurl; do
-            python3 LinkFinder/linkfinder.py -i "$jsurl" -o cli >> js_analysis/linkfinder_endpoints.txt || true
-          done < output/all_js.txt
-          '
-
-          sort -u js_analysis/linkfinder_endpoints.txt > output/js_endpoints.txt
-
-      # -----------------------------
-      # Secrets Scan
-      # -----------------------------
-      - name: Secrets Scan
-        timeout-minutes: 15
-        run: |
-          timeout 12m mantra -l output/all_js.txt -o output/js_secrets.txt -silent -rl 1 || true
-
-      # -----------------------------
-      # Nuclei Scan
-      # -----------------------------
-      - name: Nuclei Scan
-        timeout-minutes: 45
-        run: |
-          timeout 40m nuclei -l output/live_hosts.txt \
-            -severity medium,high,critical \
-            -tags exposure,misconfig,cves \
-            -rl 1 -c 1 \
-            -timeout 10 -retries 1 \
-            -o output/nuclei_results.txt || true
-
-      # -----------------------------
       # Diff New Findings
       # -----------------------------
       - name: Diff New Findings
@@ -184,18 +109,12 @@ jobs:
 
           cp diff/subdomains_latest.txt diff/old_subdomains.txt || true
           cp diff/urls_latest.txt diff/old_urls.txt || true
-          cp diff/js_latest.txt diff/old_js.txt || true
-          cp diff/secrets_latest.txt diff/old_secrets.txt || true
 
           cp output/subdomains.txt diff/subdomains_latest.txt
           cp output/final_urls.txt diff/urls_latest.txt
-          cp output/all_js.txt diff/js_latest.txt
-          cp output/js_secrets.txt diff/secrets_latest.txt
 
           comm -13 <(sort diff/old_subdomains.txt) <(sort diff/subdomains_latest.txt) > diff/new_subdomains.txt || true
           comm -13 <(sort diff/old_urls.txt) <(sort diff/urls_latest.txt) > diff/new_urls.txt || true
-          comm -13 <(sort diff/old_js.txt) <(sort diff/js_latest.txt) > diff/new_js.txt || true
-          comm -13 <(sort diff/old_secrets.txt) <(sort diff/secrets_latest.txt) > diff/new_secrets.txt || true
 
       # -----------------------------
       # Telegram Alert
